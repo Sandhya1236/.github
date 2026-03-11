@@ -1,0 +1,101 @@
+name: Teams Notifications
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    types: [opened, closed]
+  issues:
+    types: [opened, closed]
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Adaptive Card to Teams
+        continue-on-error: true
+        env:
+          WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          EVENT="${{ github.event_name }}"
+          REPO="${{ github.repository }}"
+          ACTOR="${{ github.actor }}"
+          RUN_URL="https://github.qualcomm.com/$REPO/actions/runs/${{ github.run_id }}"
+
+          case "$EVENT" in
+            pull_request)
+              PR_NUM="${{ github.event.pull_request.number }}"
+              ACTION="${{ github.event.action }}"
+              MERGED="${{ github.event.pull_request.merged }}"
+              PR_URL="${{ github.event.pull_request.html_url }}"
+              if [ "$ACTION" = "closed" ] && [ "$MERGED" = "true" ]; then
+                TITLE="✅ PR #${PR_NUM} Merged"
+              elif [ "$ACTION" = "closed" ]; then
+                TITLE="❌ PR #${PR_NUM} Closed"
+              else
+                TITLE="🔔 PR #${PR_NUM} ${ACTION}"
+              fi
+              LINK="$PR_URL"
+              ;;
+            issues)
+              TITLE="🐛 Issue #${{ github.event.issue.number }} ${{ github.event.action }}"
+              LINK="${{ github.event.issue.html_url }}"
+              ;;
+            push)
+              TITLE="🔀 Push to ${{ github.ref_name }}"
+              LINK="$RUN_URL"
+              ;;
+            workflow_dispatch)
+              TITLE="🧪 Manual Test from $ACTOR"
+              LINK="$RUN_URL"
+              ;;
+            *)
+              TITLE="⚡ $EVENT"
+              LINK="$RUN_URL"
+              ;;
+          esac
+
+          PAYLOAD=$(cat <<EOF
+          {
+            "type": "AdaptiveCard",
+            "\$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "version": "1.4",
+            "body": [
+              {
+                "type": "TextBlock",
+                "text": "${TITLE}",
+                "weight": "Bolder",
+                "size": "Medium",
+                "wrap": true
+              },
+              {
+                "type": "TextBlock",
+                "text": "**Repo:** ${REPO}  \n**By:** ${ACTOR}",
+                "wrap": true
+              }
+            ],
+            "actions": [
+              {
+                "type": "Action.OpenUrl",
+                "title": "View on GitHub",
+                "url": "${LINK}"
+              }
+            ]
+          }
+          EOF
+          )
+
+          HTTP_STATUS=$(curl -s -o /tmp/teams_response.txt -w "%{http_code}" \
+            -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+
+          echo "HTTP Status: $HTTP_STATUS"
+          echo "Response: $(cat /tmp/teams_response.txt)"
+
+          if [ "$HTTP_STATUS" = "202" ] || [ "$HTTP_STATUS" = "200" ]; then
+            echo "✅ Teams notification sent successfully"
+          else
+            echo "⚠️ Unexpected status: $HTTP_STATUS"
+          fi
