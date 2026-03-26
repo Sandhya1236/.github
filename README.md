@@ -122,3 +122,4 @@ For example, to only check `.c` files in a specific directory (e.g., `/src`) in 
 ```
 
 3. For more information on Repolinter rules and options, see [Repolinter rules](https://github.com/todogroup/repolinter/blob/main/docs/rules.md)
+Test
